@@ -6,6 +6,7 @@
 #include <string.h>
 #define FLAT_INCLUDES
 #include "../range/def.h"
+#include "../range/string.h"
 #include "../window/def.h"
 #include "../window/alloc.h"
 #include "../keyargs/keyargs.h"
@@ -13,8 +14,8 @@
 #include "parse.h"
 #include "traverse.h"
 #include "../log/log.h"
-#include "../list/list.h"
-#include "../libc/string-extensions.h"
+//#include "../list/list.h"
+//#include "../libc/string-extensions.h"
 
 #include "../table/table.h"
 #define table_string_value json_value child_value
@@ -238,7 +239,7 @@ static bool _read_value (json_value * value, range_const_char * input, json_tmp 
 	    return false;
 	}
 
-	value->string = strdup (tmp->text.region.begin);
+	value->string = range_strdup_to_string (&tmp->text.region.const_cast);
 	
 	if (!value->string)
 	{
