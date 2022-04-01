@@ -8,6 +8,86 @@ struct json_object_key_value {
 
 typedef struct range(json_object_key_value) range_json_object_key_value;
 
+void _print_value(int depth, const char * key, size_t index, json_value * value)
+{
+    for (int i = 0; i < depth; i++)
+    {
+	putc('\t', stdout);
+    }
+
+    if (key)
+    {
+	printf("[%s] ", key);
+    }
+
+    if (index != (size_t) -1)
+    {
+	printf("(%zd) ", index);
+    }
+
+    json_value * i_value;
+    json_link ** i_bucket;
+    json_link * i_link;
+
+    assert (value->type != JSON_BADTYPE);
+    
+    switch (value->type)
+    {
+    case JSON_NUMBER:
+	log_normal("number: %f", value->number);
+	break;
+
+    case JSON_STRING:
+	log_normal("string: [%s]", value->string);
+	break;
+
+    case JSON_FALSE:
+	log_normal("false");
+	break;
+
+    case JSON_TRUE:
+	log_normal("true");
+	break;
+	
+    case JSON_NULL:
+	log_normal("null");
+	break;
+
+    case JSON_ARRAY:
+	log_normal("array:");
+	for_range(i_value, value->array)
+	{
+	    _print_value(depth + 1, NULL, range_index(i_value, value->array), i_value);
+	}
+	break;
+
+    case JSON_OBJECT:
+	for_range(i_bucket, *value->object)
+	{
+	    i_link = *i_bucket;
+
+	    while (i_link)
+	    {
+		_print_value(depth + 1, i_link->child.query.key.string, i_link->child.query.digest, &i_link->child.value);
+		i_link = i_link->peer;
+	    }
+	}
+	break;
+	
+    default:
+	assert(false);
+    case JSON_BADTYPE:
+	assert(false);
+    }
+}
+
+void _print_object(json_object * object)
+{
+    json_value value = { .type = JSON_OBJECT, .object = object };
+
+    _print_value(0, NULL, -1, &value);
+}
+
 static void _bound_text (range_const_char * range, const char * text)
 {
     range->begin = text;
@@ -142,6 +222,8 @@ static void _test_skip_whitespace (bool retval, const char * input, const char *
 
 static void _compare_values (json_value * a, json_value * b)
 {
+    assert (a);
+    assert (b);
     assert (a->type == b->type);
     switch (a->type)
     {
@@ -177,6 +259,8 @@ static void _test_read_array (json_array * reference_array, const char * string,
 	_compare_values (read_array.begin + i, reference_array->begin + i);
     }
 
+    json_array_clear(&read_array);
+    
     free (tmp.text.alloc.begin);
 }
 
@@ -220,16 +304,20 @@ static void _test_read_object(range_json_object_key_value * reference, const cha
 
     assert (object);
 
-    json_value * real_value;
+    json_pair * real_pair;
     json_object_key_value * reference_kv;
 
     for_range (reference_kv, *reference)
     {
 	log_normal ("Testing reference value %s", reference_kv->key);
-	real_value = json_lookup(object, reference_kv->key);
-	assert (real_value);
-	_compare_values (real_value, &reference_kv->value);
+	real_pair = json_lookup_string(object, reference_kv->key);
+	assert (json_include_string(object, reference_kv->key) == json_lookup_string(object, reference_kv->key));
+	assert (real_pair);
+	_compare_values (&real_pair->value, &reference_kv->value);
     }
+
+    json_object_clear(object);
+    free(object);
     
     free (tmp.text.alloc.begin);
 }

@@ -1,30 +1,49 @@
-#include <stdlib.h>
-#include <ctype.h>
+#include "traverse.h"
+
 #include <stdbool.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
-#define FLAT_INCLUDES
-#include "../range/def.h"
-#include "../range/string.h"
+
+#include "parse.h"
 #include "../window/def.h"
 #include "../window/alloc.h"
-#include "../keyargs/keyargs.h"
-#include "def.h"
-#include "parse.h"
-#include "traverse.h"
 #include "../log/log.h"
-//#include "../list/list.h"
-//#include "../libc/string-extensions.h"
+#include "../range/alloc.h"
+#include "../range/string.h"
 
-#include "../table/table.h"
-#define table_string_value json_value child_value
-#define table_string_value_free(value) json_clear (&(value).child_value)
-#include "../table/table-string.h"
+void json_array_clear(json_array * array)
+{
+    json_value * i;
 
-struct json_object {
-    table_string map;
-};
+    for_range (i, *array)
+    {
+	json_value_clear(i);
+    }
+
+    free (array->begin);
+
+    array->begin = array->end = NULL;
+}
+
+void json_value_clear(json_value * value)
+{
+    if (value->type == JSON_STRING)
+    {
+	free (value->string);
+    }
+    else if (value->type == JSON_OBJECT)
+    {
+	json_object_clear (value->object);
+	free(value->object);
+    }
+    else if (value->type == JSON_ARRAY)
+    {
+	json_array_clear(&value->array);
+    }
+}
 
 window_typedef(json_value, json_value);
 
@@ -175,6 +194,7 @@ static bool _read_string (window_char * string, range_const_char * text)
 	else if (*text->begin == '"')
 	{
 	    *window_push (*string) = '\0';
+	    string->region.end--;
 	    text->begin++;
 	    return true;
 	}
@@ -227,6 +247,8 @@ static bool _read_value (json_value * value, range_const_char * input, json_tmp 
     value->type = _identify_next (input);
     //log_normal ("Read %s", json_type_name(value->type));
 
+    assert (value->type != JSON_BADTYPE);
+        
     switch (value->type)
     {
     case JSON_OBJECT:
@@ -332,25 +354,27 @@ success:
     return true;
 }
 
+/*
 static void json_clear (json_value * value);
 
 static void _free_object (json_object * object)
 {
+    
     table_string_clear (object->map);
     free (object);
-}
+    }*/
 
 static json_object * _read_object (range_const_char * text, json_tmp * tmp)
 {
     json_object * object = calloc (1, sizeof(*object));
-    
-    table_string_resize (object->map, 1031);
+
+    //table_string_resize (object->map, 1031);
 	
     assert (*text->begin == '{');
 
     text->begin++;
 
-    json_value * set_value;
+    json_pair * set_pair;
 
     bool expect_pair = false;
 
@@ -388,14 +412,20 @@ static json_object * _read_object (range_const_char * text, json_tmp * tmp)
 	}
 
 	text->begin++;
-	
-	set_value = &table_string_include(object->map, tmp->text.region.begin)->value.child_value;
+        
+	set_pair = json_include_range(object, &tmp->text.region.const_cast);
 
-	if (!_read_value (set_value, text, tmp))
+	assert ((size_t)range_count(set_pair->query.key.range) == strlen(set_pair->query.key.string));
+        
+	if (!_read_value (&set_pair->value, text, tmp))
 	{
 	    goto fail;
 	}
 
+	assert (set_pair->value.type != JSON_BADTYPE);
+
+	assert ((size_t)range_count(set_pair->query.key.range) == strlen(set_pair->query.key.string));
+        
 	expect_pair = false;
 
 	_skip_whitespace (text);
@@ -405,10 +435,13 @@ static json_object * _read_object (range_const_char * text, json_tmp * tmp)
 	    expect_pair = true;
 	    text->begin++;
 	}
+
+	assert (json_lookup_string(object, set_pair->query.key.string));
     }
     
 fail:
-    _free_object (object);
+    json_object_clear(object);
+    free(object);
     return NULL;
 
 success:
@@ -426,7 +459,7 @@ json_value * json_parse (const range_const_char * input)
     if (!_read_value (value, &text, &tmp))
     {
 	free (tmp.text.alloc.begin);
-	json_free (value);
+	json_value_free (value);
 	return NULL;
     }
 
@@ -435,7 +468,7 @@ json_value * json_parse (const range_const_char * input)
     return value;
 }
 
-json_value * json_lookup (const json_object * object, const char * key)
+/*json_value * json_lookup (const json_object * object, const char * key)
 {
     table_string_query query = table_string_query(key);
     table_string_bucket bucket = table_string_bucket(object->map, query);
@@ -445,9 +478,9 @@ json_value * json_lookup (const json_object * object, const char * key)
     table_string_item * item = table_get_bucket_item (bucket);
 
     return item ? &item->value.child_value : NULL;
-}
+    }*/
 
-static void json_clear (json_value * value)
+/*static void json_clear (json_value * value)
 {
     json_value * member;
     
@@ -477,9 +510,9 @@ static void json_clear (json_value * value)
 	break;
 
     }
-}
+    }*/
 
-void json_free (json_value * value)
+/*void json_free (json_value * value)
 {
     if (!value)
     {
@@ -489,7 +522,7 @@ void json_free (json_value * value)
     json_clear (value);
     
     free (value);
-}
+    }*/
 
 const char * json_type_name(json_type type)
 {
@@ -504,9 +537,9 @@ struct json_number_options {
 
 keyargs_define(json_get_bool)
 {
-    json_value * value = json_lookup(args.parent, args.key);
+    json_pair * pair = json_lookup_string(args.parent, args.key);
 
-    if (!value || value->type == JSON_NULL)
+    if (!pair || pair->value.type == JSON_NULL)
     {
 	if (args.optional)
 	{
@@ -516,11 +549,11 @@ keyargs_define(json_get_bool)
 	log_fatal ("Object has no child %s", args.key);
     }
 
-    if (value->type == JSON_TRUE)
+    if (pair->value.type == JSON_TRUE)
     {
 	return true;
     }
-    else if (value->type == JSON_FALSE)
+    else if (pair->value.type == JSON_FALSE)
     {
 	return false;
     }
@@ -540,9 +573,9 @@ fail:
 
 keyargs_define(json_get_number)
 {
-    json_value * value = json_lookup(args.parent, args.key);
+    json_pair * pair = json_lookup_string(args.parent, args.key);
 
-    if (!value || value->type == JSON_NULL)
+    if (!pair || pair->value.type == JSON_NULL)
     {
 	if (args.optional)
 	{
@@ -552,12 +585,12 @@ keyargs_define(json_get_number)
 	log_fatal ("Object has no child %s", args.key);
     }
 
-    if (value->type != JSON_NUMBER)
+    if (pair->value.type != JSON_NUMBER)
     {
 	log_fatal ("Object child %s is not a number", args.key);
     }
 
-    return value->number;
+    return pair->value.number;
 
 fail:
     if (args.success)
@@ -569,9 +602,9 @@ fail:
 
 keyargs_define(json_get_string)
 {
-    json_value * value = json_lookup(args.parent, args.key);
+    json_pair * pair = json_lookup_string(args.parent, args.key);
 
-    if (value->type == JSON_NULL)
+    if (!pair || pair->value.type == JSON_NULL)
     {
 	if (args.optional && args.default_value)
 	{
@@ -581,14 +614,14 @@ keyargs_define(json_get_string)
 	log_fatal ("Object has no child %s", args.key);
     }
 
-    if (value->type != JSON_STRING)
+    if (pair->value.type != JSON_STRING)
     {
 	log_fatal ("Object child %s is not a string", args.key);
     }
 
-    assert (value->string != NULL);
+    assert (pair->value.string != NULL);
 
-    return value->string;
+    return pair->value.string;
 
 fail:
     if (args.success)
@@ -601,9 +634,9 @@ fail:
 
 keyargs_define(json_get_array)
 {
-    json_value * value = json_lookup(args.parent, args.key);
+    json_pair * pair = json_lookup_string(args.parent, args.key);
 
-    if (!value || value->type == JSON_NULL)
+    if (!pair || pair->value.type == JSON_NULL)
     {
 	if (!args.optional)
 	{
@@ -615,12 +648,12 @@ keyargs_define(json_get_array)
 	}
     }
 
-    if (value->type != JSON_ARRAY)
+    if (pair->value.type != JSON_ARRAY)
     {
 	log_fatal ("Object child %s is not an array", args.key);
     }
 
-    return &value->array;
+    return &pair->value.array;
     
 fail:
     return NULL;
@@ -628,9 +661,9 @@ fail:
 
 keyargs_define(json_get_object)
 {
-    json_value * value = json_lookup(args.parent, args.key);
+    json_pair * pair = json_lookup_string(args.parent, args.key);
 
-    if (!value || value->type == JSON_NULL)
+    if (!pair || pair->value.type == JSON_NULL)
     {
 	if (!args.optional)
 	{
@@ -642,12 +675,12 @@ keyargs_define(json_get_object)
 	}
     }
 
-    if (value->type != JSON_OBJECT)
+    if (pair->value.type != JSON_OBJECT)
     {
 	log_fatal ("Object child %s is not an object", args.key);
     }
 
-    return value->object;
+    return pair->value.object;
 
 fail:
     return NULL;

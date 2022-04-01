@@ -1,12 +1,10 @@
 #ifndef FLAT_INCLUDES
-#include <stdbool.h>
-#define FLAT_INCLUDES
-#include "../range/def.h"
-#include "../keyargs/keyargs.h"
 #include "def.h"
+#include "../keyargs/keyargs.h"
+#include <stdbool.h>
 #endif
 
-json_value * json_lookup (const json_object * object, const char * key);
+//json_value * json_lookup (const json_object * object, const char * key);
 const char * json_type_name(json_type type);
 
 #define json_get_number(...) keyargs_call(json_get_number, __VA_ARGS__)
