@@ -261,7 +261,7 @@ static bool _read_value (json_value * value, range_const_char * input, json_tmp 
 	    return false;
 	}
 
-	value->string = range_strdup_to_string (&tmp->text.region.const_cast);
+	value->string = range_strdup_to_string (&tmp->text.region.alias_const);
 	
 	if (!value->string)
 	{
@@ -413,7 +413,7 @@ static json_object * _read_object (range_const_char * text, json_tmp * tmp)
 
 	text->begin++;
         
-	set_pair = json_include_range(object, &tmp->text.region.const_cast);
+	set_pair = json_include_range(object, &tmp->text.region.alias_const);
 
 	assert ((size_t)range_count(set_pair->query.key.range) == strlen(set_pair->query.key.string));
         
